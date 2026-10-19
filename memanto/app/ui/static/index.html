@@ -3561,6 +3561,14 @@
     </div>
     <div class="toast-container" id="toasts"></div>
     <script>
+        // DOM Utility to show loader without losing height (prevents scroll jumps)
+        function setContainerLoading(el, text = '') {
+            if (!el) return;
+            const h = el.getBoundingClientRect().height;
+            const minH = h > 20 ? `min-height:${h}px;` : 'padding:20px;';
+            el.innerHTML = `<div class="loading-overlay" style="${minH}"><span class="spinner"></span> ${text}</div>`;
+        }
+
         /* ================================================================
            MEMANTO Web UI — Application Logic
            ================================================================ */
@@ -3919,7 +3927,7 @@
                 box.innerHTML = buildAgentsTable(S._cachedAgents);
                 // Subtle updating indicator could go here
             } else {
-                box.innerHTML = '<div class="loading-overlay"><span class="spinner"></span> Loading agents...</div>';
+                setContainerLoading(box, 'Loading agents...');
             }
             
             if (!isBackendConfigured()) {
@@ -4422,7 +4430,7 @@
             });
 
             if (S.agentId) {
-                profile.innerHTML = '<div class="loading-overlay" style="min-height: 100px"><span class="spinner"></span></div>';
+                setContainerLoading(profile, '');
                 api('GET', `/api/v2/agents/${S.agentId}?include_counts=false`).then(agent => {
                     profile.innerHTML = `
                 <table class="config-table"><tbody>
@@ -4441,7 +4449,7 @@
             }
 
             if (hasActiveSession()) {
-                session.innerHTML = '<div class="loading-overlay" style="min-height: 100px"><span class="spinner"></span></div>';
+                setContainerLoading(session, '');
                 api('GET', '/api/v2/status').then(sess => {
                     const hrs = Math.floor((sess.time_remaining_seconds || 0) / 3600);
                     const mins = Math.floor(((sess.time_remaining_seconds || 0) % 3600) / 60);
@@ -4592,7 +4600,7 @@
             const simRaw = document.getElementById('recSim').value;
             if (simRaw) body.min_similarity = parseFloat(simRaw);
             const box = document.getElementById('recallResults');
-            box.innerHTML = '<div class="loading-overlay"><span class="spinner"></span> Searching...</div>';
+            setContainerLoading(box, 'Searching...');
             try {
                 const res = await api('POST', `/api/v2/agents/${S.agentId}/recall`, body);
                 const mems = res.memories || [];
@@ -4776,7 +4784,7 @@
             }
 
             const box = document.getElementById('explorerTable');
-            box.innerHTML = '<div class="loading-overlay"><span class="spinner"></span> Loading memories...</div>';
+            setContainerLoading(box, 'Loading memories...');
             document.getElementById('tmStatus').textContent =
                 mode === 'asof' ? `Viewing memory as of ${tmDate}` :
                 mode === 'since' ? `Showing changes since ${tmDate}` :
@@ -5148,7 +5156,7 @@
             if (S.history && S.history.length > 0) {
                 renderHistory();
             } else {
-                box.innerHTML = '<div class="loading-overlay"><span class="spinner"></span> Loading history...</div>';
+                setContainerLoading(box, 'Loading history...');
             }
             
             try {
@@ -5322,7 +5330,7 @@
         async function loadDaySummaryPanel(key) {
             const body = document.getElementById('historySummaryBody');
             if (!body) return;
-            body.innerHTML = '<div class="loading-overlay"><span class="spinner"></span> Loading summary…</div>';
+            setContainerLoading(body, 'Loading summary…');
             try {
                 const res = await api('GET', `/api/ui/daily-summary?date=${encodeURIComponent(key)}`);
                 renderDaySummaryPanel(key, res);
@@ -5368,7 +5376,7 @@
             const prev = btn ? btn.innerHTML : null;
             if (btn) { btn.disabled = true; btn.innerHTML = '↻ …'; }
             const body = document.getElementById('historySummaryBody');
-            if (body) body.innerHTML = '<div class="loading-overlay"><span class="spinner"></span> Regenerating…</div>';
+            if (body) setContainerLoading(body, 'Regenerating…');
             try {
                 const res = await api('POST', '/api/ui/daily-summary', { date: key });
                 const status = (res.summary && res.summary.status) || 'unknown';
@@ -6233,7 +6241,7 @@
                 box.innerHTML = '<p style="color:var(--text-dim);padding:20px">No active agent. <a href="#" onclick="goToPage(\'agents\');return false" style="color:var(--accent);text-decoration:none">Go to the Agents page</a> to activate one.</p>';
                 return;
             }
-            box.innerHTML = '<div class="loading-overlay"><span class="spinner"></span> Loading policy...</div>';
+            setContainerLoading(box, 'Loading policy...');
             try {
                 const [res, presetRes] = await Promise.all([
                     api('GET', `/api/v2/agents/${S.agentId}/policy`),
@@ -6508,7 +6516,7 @@
 
         async function runPolicySweep(dryRun) {
             const box = document.getElementById('policySweepResult');
-            box.innerHTML = '<div class="loading-overlay"><span class="spinner"></span> Evaluating...</div>';
+            setContainerLoading(box, 'Evaluating...');
             try {
                 const res = await api('POST', `/api/v2/agents/${S.agentId}/policy/apply`, { dry_run: dryRun });
                 if (res.policy_is_empty) {
@@ -6536,7 +6544,7 @@
 
         async function runPolicyPurge() {
             const box = document.getElementById('policySweepResult');
-            box.innerHTML = '<div class="loading-overlay"><span class="spinner"></span> Checking...</div>';
+            setContainerLoading(box, 'Checking...');
             let preview;
             try {
                 preview = await api('POST', `/api/v2/agents/${S.agentId}/policy/purge`, { dry_run: true });
@@ -6594,7 +6602,7 @@
                     renderConflictsList(container, bannerEl, conflicts, rawAgentId, rawDate);
                 }
             } else {
-                container.innerHTML = '<div class="loading-overlay"><span class="spinner"></span> Loading conflicts...</div>';
+                setContainerLoading(container, 'Loading conflicts...');
             }
 
             try {
@@ -6687,7 +6695,7 @@
             if (mems.length > 0) {
                 renderAnalyticsCards(cards, mems);
             } else {
-                cards.innerHTML = '<div class="loading-overlay"><span class="spinner"></span> Loading analytics...</div>';
+                setContainerLoading(cards, 'Loading analytics...');
             }
 
             try {
@@ -7792,8 +7800,8 @@
         async function loadConnections() {
             const grid = document.getElementById('connectionsGrid');
             const details = document.getElementById('connectionDetails');
-            grid.innerHTML = '<div class="loading-overlay"><span class="spinner"></span> Loading connections...</div>';
-            details.innerHTML = '';
+            setContainerLoading(grid, 'Loading connections...');
+            setContainerLoading(details, '');
             try {
                 const res = await api('GET', '/api/ui/connections');
                 S.connections = res.connections || [];
@@ -7804,7 +7812,9 @@
                 if (S.activeConnection) {
                     const stillThere = S.connections.find(c => c.name === S.activeConnection);
                     if (stillThere) renderConnectionDetails(stillThere);
-                    else S.activeConnection = null;
+                    else { S.activeConnection = null; details.innerHTML = ''; }
+                } else {
+                    details.innerHTML = '';
                 }
             } catch (e) {
                 grid.innerHTML = `<p style="color:var(--error);padding:20px">Failed to load connections: ${escHtml(e.message)}</p>`;
@@ -7996,7 +8006,7 @@
         async function browseTo(path) {
             const box = document.getElementById('folderBrowser');
             if (!box) return;
-            box.innerHTML = '<div class="loading-overlay" style="padding:16px"><span class="spinner"></span> Loading…</div>';
+            setContainerLoading(box, 'Loading…');
             try {
                 const qs = path ? ('?path=' + encodeURIComponent(path)) : '';
                 const data = await api('GET', '/api/ui/browse' + qs);
