@@ -398,23 +398,19 @@ def _load_documents_portable(
             raise ValueError(f"OKF bundle file count exceeds limit ({max_bundle_files})")
 
     for file_path in sorted(found_files):
-        current = file_path
-        is_unsafe = False
-        depth = 0
-        while current != root:
-            if current.is_symlink():
-                is_unsafe = True
-                break
-            current = current.parent
-            depth += 1
-            if depth > 32:
-                raise ValueError(
-                    f"OKF bundle directory too deep (limit 32): {file_path}"
-                )
+        try:
+            rel_parts = file_path.relative_to(root).parts
+        except ValueError:
+            rel_parts = file_path.parts
 
-        if is_unsafe:
+        if len(rel_parts) > 32:
             raise ValueError(
-                f"OKF bundle contains a symbolic-link document or directory: {file_path}"
+                f"OKF bundle directory too deep (limit 32): {file_path}"
+            )
+
+        if not file_path.resolve().is_relative_to(scan_root.resolve()):
+            raise ValueError(
+                f"OKF bundle contains an unsafe symbolic-link or junction escape: {file_path}"
             )
 
         file_size = file_path.stat().st_size
