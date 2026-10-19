@@ -123,7 +123,10 @@ def _read_document_at(directory_fd: int, name: str, display_path: Path) -> str:
 
 
 def _read_directory_documents(
-    directory_fd: int, prefix: Path = Path(), depth: int = 0, counters: list[int] | None = None
+    directory_fd: int,
+    prefix: Path = Path(),
+    depth: int = 0,
+    counters: list[int] | None = None,
 ) -> list[tuple[Path, str]]:
     """Recursively read documents under an open directory descriptor with depth and size bounds.
 
@@ -193,7 +196,9 @@ def _read_directory_documents(
                         f"OKF bundle contains an unsafe directory: {relative_path}"
                     )
                 documents.extend(
-                    _read_directory_documents(child_fd, relative_path, depth + 1, counters)
+                    _read_directory_documents(
+                        child_fd, relative_path, depth + 1, counters
+                    )
                 )
             finally:
                 os.close(child_fd)
@@ -203,8 +208,10 @@ def _read_directory_documents(
         if not stat.S_ISREG(entry_stat.st_mode):
             raise ValueError(f"OKF document is not a regular file: {relative_path}")
         if counters[0] >= max_bundle_files:
-            raise ValueError(f"OKF bundle file count exceeds limit ({max_bundle_files})")
-            
+            raise ValueError(
+                f"OKF bundle file count exceeds limit ({max_bundle_files})"
+            )
+
         text = _read_document_at(directory_fd, name, relative_path)
         actual_size = len(text.encode("utf-8"))
 
@@ -214,7 +221,7 @@ def _read_directory_documents(
             raise ValueError(
                 f"OKF bundle total size exceeds limit ({max_bundle_bytes // (1024 * 1024)}MB)"
             )
-            
+
         counters[0] += 1
         counters[1] += actual_size
         documents.append((relative_path, text))
@@ -384,7 +391,9 @@ def _load_documents_portable(
         scan_root = root
 
     if not scan_root.resolve().is_relative_to(root.resolve()):
-        raise ValueError(f"OKF bundle memories directory escapes bundle root: {scan_root}")
+        raise ValueError(
+            f"OKF bundle memories directory escapes bundle root: {scan_root}"
+        )
 
     documents = []
     total_bytes = 0
@@ -397,7 +406,9 @@ def _load_documents_portable(
             continue
         found_files.append(file_path)
         if len(found_files) > max_bundle_files:
-            raise ValueError(f"OKF bundle file count exceeds limit ({max_bundle_files})")
+            raise ValueError(
+                f"OKF bundle file count exceeds limit ({max_bundle_files})"
+            )
 
     for file_path in sorted(found_files):
         try:
@@ -406,9 +417,7 @@ def _load_documents_portable(
             rel_parts = file_path.parts
 
         if len(rel_parts) > 32:
-            raise ValueError(
-                f"OKF bundle directory too deep (limit 32): {file_path}"
-            )
+            raise ValueError(f"OKF bundle directory too deep (limit 32): {file_path}")
 
         with file_path.open("r", encoding="utf-8") as handle:
             # Verify the resolved path AFTER opening to prevent TOCTOU junction swaps,
@@ -423,11 +432,11 @@ def _load_documents_portable(
             # before we actually load the whole thing into memory.
             max_chars = 50 * 1024 * 1024
             text = handle.read(max_chars + 1)
-            
+
             # If there's still more data to read after max_chars, it's definitively too big.
             if handle.read(1):
                 raise ValueError(f"OKF document exceeds size limit (50MB): {file_path}")
-            
+
         actual_size = len(text.encode("utf-8"))
 
         if actual_size > 50 * 1024 * 1024:

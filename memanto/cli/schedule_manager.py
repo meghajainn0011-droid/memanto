@@ -61,6 +61,7 @@ class ScheduleManager:
         if self.os_type == "Windows":
             return subprocess.list2cmdline(parts)
         import shlex
+
         cmd = shlex.join(parts)
         return cmd.replace("%", r"\%")
 

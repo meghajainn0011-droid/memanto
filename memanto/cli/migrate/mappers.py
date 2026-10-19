@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from memanto.app.constants import VALID_MEMORY_TYPES, VALID_PROVENANCE_TYPES
-from memanto.app.core import TAG_PATTERN, INJECTION_PATTERNS
+from memanto.app.core import INJECTION_PATTERNS, TAG_PATTERN
 
 # Mem0 ships category labels per memory. Map the common ones to Memanto's
 # typed primitives; everything else falls through to None (auto-classify).
@@ -86,9 +86,8 @@ def _bounded_tags(tags: list[str]) -> tuple[list[str], list[str]]:
         text = tag.strip()
         if not text or text in kept:
             continue
-        if (
-            text.startswith("#")
-            or any(pattern.search(text) for pattern in _INJECTION_TAG_PATTERNS)
+        if text.startswith("#") or any(
+            pattern.search(text) for pattern in _INJECTION_TAG_PATTERNS
         ):
             # Never persist injection-shaped or filter-token tags - not even
             # in the supporting-data footer, whose content feeds session
@@ -287,10 +286,14 @@ def map_mem0(export: dict[str, Any]) -> list[dict[str, Any]]:
         expires_at = _pick_first_dt(mem, ("expiration_date", "expires_at"))
 
         tags, extra_tags = _bounded_tags(tags)
-        
+
         safe_all_tags = set(tags + extra_tags)
         categories = [c for c in categories if c in safe_all_tags]
-        scope_tag = scope_tag if scope_tag in safe_all_tags else ("[Filtered]" if scope_tag else None)
+        scope_tag = (
+            scope_tag
+            if scope_tag in safe_all_tags
+            else ("[Filtered]" if scope_tag else None)
+        )
 
         # Anything we couldn't slot directly goes into the footer.
         footer = _format_supporting_data(
@@ -356,7 +359,7 @@ def map_letta(export: dict[str, Any]) -> list[dict[str, Any]]:
         created_at = _pick_first_dt(passage, ("created_at", "createdAt"))
 
         tags, extra_tags = _bounded_tags(tags)
-        
+
         safe_all_tags = set(tags + extra_tags)
         source_tags = [t for t in source_tags if t in safe_all_tags]
 
@@ -488,17 +491,17 @@ def map_supermemory(export: dict[str, Any]) -> list[dict[str, Any]]:
         doc_created = _pick_first_dt(
             doc.get("detail") or doc, ("createdAt", "created_at")
         )
-        
+
         bounded_doc_tags, extra_doc_tags = _bounded_tags(doc_tags)
         safe_all_doc_tags = set(bounded_doc_tags + extra_doc_tags)
         safe_doc_tags = [t for t in doc_tags if str(t) in safe_all_doc_tags]
-        
+
         for chunk in doc.get("chunks", []) or []:
             content = (chunk.get("content") or chunk.get("text") or "").strip()
             if not content or content in seen:
                 continue
             seen.add(content)
-            
+
             footer = _format_supporting_data(
                 [
                     (
@@ -674,7 +677,7 @@ def map_zep(export: dict[str, Any]) -> list[dict[str, Any]]:
         if relation:
             tags.append(str(relation).lower())
         tags, extra_tags = _bounded_tags(tags)
-        
+
         # Determine if the relation name survived the tag filter. If the tag was rejected
         # (e.g. because it was an injection payload), also drop it from the footer.
         relation_survived = relation and str(relation).lower() in tags

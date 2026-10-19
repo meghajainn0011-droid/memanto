@@ -7,7 +7,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Any
 
-from pydantic import AfterValidator, BaseModel, Field, StringConstraints, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    Field,
+    StringConstraints,
+    field_validator,
+)
 
 from memanto.app.constants import (
     INJECTION_PATTERNS,
