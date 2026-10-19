@@ -90,9 +90,9 @@ def _bounded_tags(tags: list[str]) -> tuple[list[str], list[str]]:
             text.startswith("#")
             or any(pattern.search(text) for pattern in _INJECTION_TAG_PATTERNS)
         ):
-            # SECURITY (Memanto #1852): never persist injection-shaped or
-            # filter-token tags - not even in the supporting-data footer,
-            # whose content feeds session summaries and daily-analysis prompts.
+            # Never persist injection-shaped or filter-token tags - not even
+            # in the supporting-data footer, whose content feeds session
+            # summaries and daily-analysis prompts.
             continue
         if (
             len(text) > _MAX_TAG_CHARS
@@ -286,6 +286,12 @@ def map_mem0(export: dict[str, Any]) -> list[dict[str, Any]]:
         created_at = _pick_first_dt(mem, ("created_at", "createdAt"))
         expires_at = _pick_first_dt(mem, ("expiration_date", "expires_at"))
 
+        tags, extra_tags = _bounded_tags(tags)
+        
+        safe_all_tags = set(tags + extra_tags)
+        categories = [c for c in categories if c in safe_all_tags]
+        scope_tag = scope_tag if scope_tag in safe_all_tags else ("[Filtered]" if scope_tag else None)
+
         # Anything we couldn't slot directly goes into the footer.
         footer = _format_supporting_data(
             [
@@ -298,6 +304,7 @@ def map_mem0(export: dict[str, Any]) -> list[dict[str, Any]]:
                 ("Immutable", mem.get("immutable")),
                 ("Source created_at", created_at.isoformat() if created_at else None),
                 ("Expires at", expires_at.isoformat() if expires_at else None),
+                ("Extra tags", extra_tags),
             ]
         )
 
@@ -348,6 +355,11 @@ def map_letta(export: dict[str, Any]) -> list[dict[str, Any]]:
 
         created_at = _pick_first_dt(passage, ("created_at", "createdAt"))
 
+        tags, extra_tags = _bounded_tags(tags)
+        
+        safe_all_tags = set(tags + extra_tags)
+        source_tags = [t for t in source_tags if t in safe_all_tags]
+
         footer = _format_supporting_data(
             [
                 ("Source", f"letta:{passage.get('id')}" if passage.get("id") else None),
@@ -357,6 +369,7 @@ def map_letta(export: dict[str, Any]) -> list[dict[str, Any]]:
                 ("Letta metadata", passage.get("metadata")),
                 ("Letta passage source", passage.get("source")),
                 ("Source created_at", created_at.isoformat() if created_at else None),
+                ("Extra tags", extra_tags),
             ]
         )
 
@@ -418,6 +431,8 @@ def map_supermemory(export: dict[str, Any]) -> list[dict[str, Any]]:
 
         created_at = _pick_first_dt(mem, ("createdAt", "created_at"))
 
+        tags, extra_tags = _bounded_tags(tags)
+
         footer = _format_supporting_data(
             [
                 (
@@ -429,6 +444,7 @@ def map_supermemory(export: dict[str, Any]) -> list[dict[str, Any]]:
                 ("Supermemory metadata", mem.get("metadata")),
                 ("Score", mem.get("score")),
                 ("Source created_at", created_at.isoformat() if created_at else None),
+                ("Extra tags", extra_tags),
             ]
         )
 
@@ -477,6 +493,10 @@ def map_supermemory(export: dict[str, Any]) -> list[dict[str, Any]]:
             if not content or content in seen:
                 continue
             seen.add(content)
+            
+            bounded_doc_tags, extra_doc_tags = _bounded_tags(doc_tags)
+            safe_doc_tags = [t for t in doc_tags if t in set(bounded_doc_tags + extra_doc_tags)]
+            
             footer = _format_supporting_data(
                 [
                     (
@@ -485,13 +505,14 @@ def map_supermemory(export: dict[str, Any]) -> list[dict[str, Any]]:
                         if doc_id
                         else None,
                     ),
-                    ("Container tags", doc_tags),
+                    ("Container tags", safe_doc_tags),
                     ("Document id", doc_id),
                     ("Chunk id", chunk.get("id")),
                     (
                         "Source created_at",
                         doc_created.isoformat() if doc_created else None,
                     ),
+                    ("Extra tags", extra_doc_tags),
                 ]
             )
             rows.append(
@@ -499,7 +520,7 @@ def map_supermemory(export: dict[str, Any]) -> list[dict[str, Any]]:
                     "title": _title_from(content),
                     "content": _attach_footer(content, footer),
                     "type": "artifact",
-                    "tags": doc_tags,
+                    "tags": bounded_doc_tags,
                     "confidence": 0.7,
                     "source": "supermemory",
                     "source_ref": (f"{doc_id}:{chunk.get('id')}" if doc_id else None),
@@ -548,7 +569,9 @@ def map_okf(export: dict[str, Any]) -> list[dict[str, Any]]:
         okf_type = entry.get("type")
         memory_type = _coerce_type(x_memanto.get("type")) or _coerce_type(okf_type)
 
-        tags = [str(t) for t in (entry.get("tags") or []) if t]
+        raw_tags = [str(t) for t in (entry.get("tags") or []) if t]
+        tags, extra_tags = _bounded_tags(raw_tags)
+
         resource = entry.get("resource")
 
         raw_conf = x_memanto.get("confidence")
@@ -582,6 +605,7 @@ def map_okf(export: dict[str, Any]) -> list[dict[str, Any]]:
             ("OKF type", okf_type if not memory_type else None),
             ("OKF resource", resource),
             ("Links", entry.get("links")),
+            ("Extra tags", extra_tags),
         ]
         for key, value in (entry.get("extra") or {}).items():
             footer_items.append((f"OKF {key}", value))
@@ -648,6 +672,10 @@ def map_zep(export: dict[str, Any]) -> list[dict[str, Any]]:
         if relation:
             tags.append(str(relation).lower())
         tags, extra_tags = _bounded_tags(tags)
+        
+        # Determine if the relation name survived the tag filter. If the tag was rejected
+        # (e.g. because it was an injection payload), also drop it from the footer.
+        relation_survived = relation and str(relation).lower() in tags
 
         created_at = _pick_first_dt(edge, ("valid_at", "created_at"))
         invalid_at = _parse_dt(edge.get("invalid_at"))
@@ -657,7 +685,7 @@ def map_zep(export: dict[str, Any]) -> list[dict[str, Any]]:
             [
                 ("Source", f"zep:{edge.get('uuid')}" if edge.get("uuid") else None),
                 ("Zep user", user_id),
-                ("Relation", relation),
+                ("Relation", relation if relation_survived else "[Filtered]"),
                 ("From", edge.get("source_node_name")),
                 ("To", edge.get("target_node_name")),
                 ("Valid from", created_at.isoformat() if created_at else None),

@@ -83,10 +83,10 @@ ALLOWED_UPDATE_FIELDS = {
 
 VALID_PATTERNS = {"support", "project", "tool"}
 
-# SECURITY (Memanto #1852): directive/override shapes used to detect
-# prompt-injection payloads. Shared by memory extraction and tag validation so
-# every write path enforces the same rule set. Patterns are matched against
-# lowercased text (they are compiled with re.IGNORECASE as well).
+# Directive/override shapes used to detect prompt-injection payloads.
+# Shared by memory extraction and tag validation so every write path enforces
+# the same rule set. Patterns are matched against lowercased text (they are
+# compiled with re.IGNORECASE as well).
 INJECTION_PATTERNS = (
     r"\bignore\s+previous\s+instructions\b",
     r"\bignore\s+prior\s+instructions\b",

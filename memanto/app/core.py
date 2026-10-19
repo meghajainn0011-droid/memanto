@@ -28,10 +28,10 @@ _INJECTION_TAG_PATTERNS = tuple(
 
 def _reject_injection_shaped_tag(value: str) -> str:
     """
-    SECURITY (Memanto #1852): tags are comma-joined into the document text
-    (``to_moorcheh_document``) and rendered into session summaries and
-    exports, so a tag must not carry directive/override payloads or the
-    documented ``#`` filter-token prefix (see ``_sanitize_query_text``).
+    Tags are comma-joined into the document text (``to_moorcheh_document``)
+    and rendered into session summaries and exports, so a tag must not carry
+    directive/override payloads or the documented ``#`` filter-token prefix
+    (see ``_sanitize_query_text``).
     The extraction path enforces the same rule set
     (``ConversationMemoryExtractionService._normalize_candidates``).
     """

@@ -2635,9 +2635,9 @@ def test_memory_tag_rejects_delimiters_and_line_breaks(tag):
     ],
 )
 def test_memory_tag_rejects_injection_shaped_tags(tag):
-    # SECURITY (Memanto #1852): tags are comma-joined into the document text and
-    # rendered into session summaries and exports; the extraction-path directive
-    # filter must not be bypassable through this write path.
+    # Tags are comma-joined into the document text and rendered into session
+    # summaries and exports; the extraction-path directive filter must not be
+    # bypassable through this write path.
     from memanto.app.routes.memory import MemoryEditRequest
 
     with pytest.raises(ValidationError):

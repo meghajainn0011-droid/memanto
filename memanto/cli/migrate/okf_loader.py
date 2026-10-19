@@ -204,21 +204,20 @@ def _read_directory_documents(
             raise ValueError(f"OKF document is not a regular file: {relative_path}")
         if counters[0] >= max_bundle_files:
             raise ValueError(f"OKF bundle file count exceeds limit ({max_bundle_files})")
-        file_size = entry_stat.st_size
-        if file_size > 50 * 1024 * 1024:
+            
+        text = _read_document_at(directory_fd, name, relative_path)
+        actual_size = len(text.encode("utf-8"))
+
+        if actual_size > 50 * 1024 * 1024:
             raise ValueError(f"OKF document exceeds size limit (50MB): {relative_path}")
-        if counters[1] + file_size > max_bundle_bytes:
+        if counters[1] + actual_size > max_bundle_bytes:
             raise ValueError(
                 f"OKF bundle total size exceeds limit ({max_bundle_bytes // (1024 * 1024)}MB)"
             )
+            
         counters[0] += 1
-        counters[1] += file_size
-        documents.append(
-            (
-                relative_path,
-                _read_document_at(directory_fd, name, relative_path),
-            )
-        )
+        counters[1] += actual_size
+        documents.append((relative_path, text))
 
     return documents
 
@@ -384,6 +383,9 @@ def _load_documents_portable(
     else:
         scan_root = root
 
+    if not scan_root.resolve().is_relative_to(root.resolve()):
+        raise ValueError(f"OKF bundle memories directory escapes bundle root: {scan_root}")
+
     documents = []
     total_bytes = 0
     max_bundle_bytes = 64 * 1024 * 1024
@@ -408,22 +410,28 @@ def _load_documents_portable(
                 f"OKF bundle directory too deep (limit 32): {file_path}"
             )
 
-        if not file_path.resolve().is_relative_to(scan_root.resolve()):
-            raise ValueError(
-                f"OKF bundle contains an unsafe symbolic-link or junction escape: {file_path}"
-            )
+        with file_path.open("r", encoding="utf-8") as handle:
+            # Verify the resolved path AFTER opening to prevent TOCTOU junction swaps,
+            # especially on Windows where an open handle prevents moving/deletion.
+            if not file_path.resolve().is_relative_to(scan_root.resolve()):
+                raise ValueError(
+                    f"OKF bundle contains an unsafe symbolic-link or junction escape: {file_path}"
+                )
 
-        file_size = file_path.stat().st_size
-        if file_size > 50 * 1024 * 1024:
+            text = handle.read()
+            
+        actual_size = len(text.encode("utf-8"))
+
+        if actual_size > 50 * 1024 * 1024:
             raise ValueError(f"OKF document exceeds size limit (50MB): {file_path}")
 
-        if total_bytes + file_size > max_bundle_bytes:
+        if total_bytes + actual_size > max_bundle_bytes:
             raise ValueError(
                 f"OKF bundle total size exceeds limit ({max_bundle_bytes // (1024 * 1024)}MB)"
             )
 
-        total_bytes += file_size
-        documents.append((file_path, file_path.read_text(encoding="utf-8")))
+        total_bytes += actual_size
+        documents.append((file_path, text))
 
     return root, documents
 
