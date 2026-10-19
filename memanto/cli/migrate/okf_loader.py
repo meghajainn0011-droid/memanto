@@ -418,7 +418,15 @@ def _load_documents_portable(
                     f"OKF bundle contains an unsafe symbolic-link or junction escape: {file_path}"
                 )
 
-            text = handle.read()
+            # A document must not exceed 50MiB. UTF-8 characters are at least 1 byte each,
+            # so reading 50MiB + 1 characters guarantees we'll catch a file that exceeds the byte limit
+            # before we actually load the whole thing into memory.
+            max_chars = 50 * 1024 * 1024
+            text = handle.read(max_chars + 1)
+            
+            # If there's still more data to read after max_chars, it's definitively too big.
+            if handle.read(1):
+                raise ValueError(f"OKF document exceeds size limit (50MB): {file_path}")
             
         actual_size = len(text.encode("utf-8"))
 

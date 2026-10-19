@@ -488,14 +488,16 @@ def map_supermemory(export: dict[str, Any]) -> list[dict[str, Any]]:
         doc_created = _pick_first_dt(
             doc.get("detail") or doc, ("createdAt", "created_at")
         )
+        
+        bounded_doc_tags, extra_doc_tags = _bounded_tags(doc_tags)
+        safe_all_doc_tags = set(bounded_doc_tags + extra_doc_tags)
+        safe_doc_tags = [t for t in doc_tags if str(t) in safe_all_doc_tags]
+        
         for chunk in doc.get("chunks", []) or []:
             content = (chunk.get("content") or chunk.get("text") or "").strip()
             if not content or content in seen:
                 continue
             seen.add(content)
-            
-            bounded_doc_tags, extra_doc_tags = _bounded_tags(doc_tags)
-            safe_doc_tags = [t for t in doc_tags if t in set(bounded_doc_tags + extra_doc_tags)]
             
             footer = _format_supporting_data(
                 [
