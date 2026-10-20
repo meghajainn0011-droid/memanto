@@ -21,6 +21,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from memanto.app.clients.backend import Backend
+from memanto.app.config import is_loopback_host, settings
 from memanto.cli.commands._shared import (
     ACCENT,
     BOLD_BRIGHT,
@@ -30,6 +31,7 @@ from memanto.cli.commands._shared import (
     SUCCESS,
     WARNING,
     _error,
+    _warn,
     app,
     config_manager,
     console,
@@ -37,6 +39,29 @@ from memanto.cli.commands._shared import (
     print_logo,
     show_welcome_banner,
 )
+
+
+def _notify_exposed_deployment(host: str) -> None:
+    """Warn when MEMANTO serves plain HTTP on a network-facing address."""
+    if settings.DEBUG or is_loopback_host(host):
+        return
+    _warn(
+        f"Memanto is serving over plain HTTP on {host!r} (no built-in TLS). Any "
+        "network peer that can reach this port can sniff the session cookie "
+        "(full memory read/write for an active agent) and enumerate every API "
+        "route. Bind to a loopback address (127.0.0.1) or terminate TLS in "
+        "front of Memanto."
+    )
+
+
+def _uvicorn_proxy_headers() -> bool:
+    """Leave forwarded headers to Memanto when trusted proxies are configured.
+
+    uvicorn's proxy handling rewrites the client address to the
+    ``X-Forwarded-For`` value before the app runs, so the trusted-proxy check
+    would never see the proxy's own IP.
+    """
+    return not settings.MEMANTO_PROXY_ALLOWED_IPS
 
 
 def _first_run_setup() -> None:
@@ -343,14 +368,14 @@ def _import_user_config() -> tuple:
     0.1.3 through 0.1.5 all work.
     """
     try:
-        from moorcheh.cli.user_config import (  # type: ignore[import-not-found]
+        from moorcheh.cli.user_config import (  # type: ignore[import-not-found,import-untyped]
             EmbeddingConfig,
             LlmConfig,
             default_base_url,
             save_runtime_config,
         )
     except ImportError:
-        from moorcheh.user_config import (  # type: ignore[import-not-found]
+        from moorcheh.user_config import (  # type: ignore[import-not-found,import-untyped]
             EmbeddingConfig,
             LlmConfig,
             default_base_url,
@@ -506,7 +531,10 @@ def _pull_ollama_model(model: str) -> None:
     ``docker exec`` for a bundled container we can't reach over HTTP.
     """
     try:
-        from moorcheh.ollama_setup import ollama_is_reachable, pull_ollama_model_http
+        from moorcheh.ollama_setup import (  # type: ignore[import-untyped]
+            ollama_is_reachable,
+            pull_ollama_model_http,
+        )
     except ImportError:
         ollama_is_reachable = None
 
@@ -881,7 +909,9 @@ def status():
     # Registered Agents
     try:
         direct = get_client()
-        agents = direct.list_agents()
+        listed = direct.list_agents()
+        # Both clients return {"agents": [...], "count": n, "warnings": [...]}.
+        agents = listed.get("agents", []) if isinstance(listed, dict) else listed
 
         if agents:
             agent_table = Table(
@@ -912,6 +942,29 @@ def status():
     except Exception:
         console.print("[dim]Could not fetch agent list.[/dim]")
 
+    # Check for instruction updates
+    try:
+        from memanto.cli.connect.templates import TEMPLATE_VERSION
+        from memanto.cli.connect.updater import check_for_updates
+
+        status = check_for_updates(project_dir=".")
+
+        is_outdated = status.get("outdated")
+        installed_version = status.get("installed_version")
+
+        if is_outdated:
+            console.print(
+                f"\n[{BOLD_PRIMARY}]Agent Instruction Status[/{BOLD_PRIMARY}]"
+            )
+            console.print(
+                f"[yellow]⚠️ Outdated (v{installed_version} installed, v{TEMPLATE_VERSION} available)[/yellow]"
+            )
+            console.print(
+                "[yellow]   Run `memanto connect update` to apply the latest instruction hardening.[/yellow]"
+            )
+    except Exception as e:
+        console.print(f"[dim]Failed to check instruction update status: {e}[/dim]")
+
     console.print()
 
 
@@ -934,6 +987,8 @@ def serve(
     if host == "localhost":
         host = "0.0.0.0"  # Typically want 0.0.0.0 for bind
     port = port or server_cfg.get("port", 8000)
+
+    _notify_exposed_deployment(host)
 
     console.print(
         Panel.fit(
@@ -984,7 +1039,8 @@ def serve(
     display_host = "localhost" if host == "0.0.0.0" else host
     console.print("\n[green]Starting local REST API...[/green]")
     console.print(f"[dim]Server URL: http://{display_host}:{port}[/dim]")
-    console.print(f"[dim]API Docs: http://{display_host}:{port}/docs[/dim]")
+    if settings.MEMANTO_ENABLE_DOCS:
+        console.print(f"[dim]API Docs: http://{display_host}:{port}/docs[/dim]")
     console.print(f"[dim]Health Check: http://{display_host}:{port}/health[/dim]")
     console.print(
         "\n[bold]Next step:[/bold] Open a new terminal and run [bright_white]memanto agent create <agent-id>[/bright_white]."
@@ -1000,6 +1056,7 @@ def serve(
             port=port,
             reload=reload,
             log_level="info",
+            proxy_headers=_uvicorn_proxy_headers(),
         )
     except KeyboardInterrupt:
         console.print("\n\n[yellow]Server stopped.[/yellow]")
@@ -1096,7 +1153,8 @@ def ui(
         )
     )
     console.print(f"\n[{BRIGHT}]Dashboard:[/{BRIGHT}]  {ui_url}")
-    console.print(f"[dim]API Docs:   http://localhost:{port}/docs[/dim]")
+    if settings.MEMANTO_ENABLE_DOCS:
+        console.print(f"[dim]API Docs:   http://localhost:{port}/docs[/dim]")
     console.print("\n[bold]Press CTRL+C to stop.[/bold]\n")
 
     # Open browser after a short delay (in background thread)
@@ -1107,10 +1165,18 @@ def ui(
     browser_thread = threading.Thread(target=_open_browser, daemon=True)
     browser_thread.start()
 
+    _notify_exposed_deployment(host)
+
     # Start server
     try:
         os.environ["MEMANTO_UI_MODE"] = "true"
-        uvicorn.run("memanto.app.main:app", host=host, port=port, log_level="info")
+        uvicorn.run(
+            "memanto.app.main:app",
+            host=host,
+            port=port,
+            log_level="info",
+            proxy_headers=_uvicorn_proxy_headers(),
+        )
     except KeyboardInterrupt:
         console.print("\n\n[yellow]Dashboard stopped.[/yellow]")
     except Exception as e:

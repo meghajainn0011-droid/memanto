@@ -12,9 +12,18 @@ from moorcheh_sdk.exceptions import AuthenticationError, NamespaceNotFound
 from memanto.app import __version__
 from memanto.app.clients.backend import Backend, parse_backend
 from memanto.app.config import settings
+from memanto.app.middleware import TrustedProxySchemeMiddleware
 from memanto.app.routes import health, sessions
 from memanto.app.ui.routes.ui_router import mount_ui_static
 from memanto.app.ui.routes.ui_router import router as ui_router
+from memanto.app.utils.client_identity import (
+    UNKNOWN_CLIENT,
+    ClientIdentity,
+    display_for,
+    normalize_tool,
+    reset_client,
+    set_client,
+)
 
 
 def _validate_startup_dependencies() -> None:
@@ -62,13 +71,18 @@ async def lifespan(_: FastAPI):
     yield
 
 
-# Create FastAPI app
+# Create FastAPI app. The interactive docs and the OpenAPI schema are disabled
+# by default (MEMANTO_ENABLE_DOCS=true re-enables them): the server binds
+# 0.0.0.0 by default, so an unauthenticated schema would enumerate every route
+# to any network peer. Enable them only on a trusted network or behind an
+# access-control layer - HTTPS protects transport, not access to the schema.
 app = FastAPI(
     title="Memanto - Memory that AI Agents Love!",
     description="A memory layer service for agentic AI systems using Moorcheh SDK",
     version=__version__,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if settings.MEMANTO_ENABLE_DOCS else None,
+    redoc_url="/redoc" if settings.MEMANTO_ENABLE_DOCS else None,
+    openapi_url="/openapi.json" if settings.MEMANTO_ENABLE_DOCS else None,
     lifespan=lifespan,
 )
 
@@ -94,6 +108,7 @@ _validate_cors_settings(settings.ALLOWED_ORIGINS, settings.CORS_ALLOW_CREDENTIAL
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origin_regex=settings.CORS_ORIGIN_REGEX,
     allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -101,6 +116,48 @@ app.add_middleware(
     # token from the response. Custom response headers are not CORS-safelisted.
     expose_headers=["X-Session-Token"],
 )
+
+app.add_middleware(
+    TrustedProxySchemeMiddleware,
+    allowed_ips=settings.MEMANTO_PROXY_ALLOWED_IPS,
+    require_secure=settings.MEMANTO_REQUIRE_SECURE,
+)
+
+
+@app.middleware("http")
+async def attribute_calling_tool(request, call_next):
+    """Bind the calling tool to this request so activity logging can name it.
+
+    Over HTTP the server's own environment says nothing about the caller, so
+    the tool identifies itself with ``X-Memanto-Client`` (optionally
+    ``X-Memanto-Project``). The session comes from the session token, not from
+    a header.
+    """
+    tool = (request.headers.get("X-Memanto-Client") or "").strip()
+    if tool:
+        slug = normalize_tool(tool)
+        # The label is persisted to the activity log and rendered by the
+        # dashboard, so derive it from the normalized slug rather than echoing
+        # caller-controlled header text.
+        identity = ClientIdentity(
+            tool=slug,
+            display=display_for(slug),
+            project_dir=(request.headers.get("X-Memanto-Project") or "").strip()
+            or None,
+        )
+    else:
+        # Bind UNKNOWN rather than leaving the context empty. Falling through to
+        # environment detection here would attribute every anonymous HTTP call
+        # to whatever launched the *server* - an editor that started `memanto
+        # server` would be credited with requests it never made.
+        identity = UNKNOWN_CLIENT
+
+    token = set_client(identity)
+    try:
+        return await call_next(request)
+    finally:
+        reset_client(token)
+
 
 # Include routers
 app.include_router(health.router, tags=["Health"])
@@ -120,7 +177,7 @@ async def root():
         "service": "MEMANTO",
         "description": "A companion memory agent that lets your agents focus and improve while you keep ownership of everything they learn.",
         "version": __version__,
-        "docs": "/docs",
+        "docs": "/docs" if settings.MEMANTO_ENABLE_DOCS else None,
     }
 
 

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import jwt
+from filelock import FileLock
 from pydantic import ValidationError
 
 from memanto.app.config import get_data_dir, settings
@@ -42,6 +43,18 @@ from memanto.app.utils.validation import validate_safe_id
 
 _session_service = None
 logger = logging.getLogger(__name__)
+
+
+def _one_line(value: Any, default: str = "") -> str:
+    """Collapse a value into a single display line.
+
+    Summary entries are Markdown, so anything interpolated into a heading must
+    not carry line breaks. ``str.split()`` splits on every Unicode whitespace
+    code point -- including U+2028, U+2029, U+000B, U+000C and U+0085 -- so
+    this does not depend on the upstream title validator having covered all of
+    them. This mirrors ``memory_export_service._one_line``.
+    """
+    return " ".join(str(value or "").split()) or default
 
 
 def get_session_service() -> "SessionService":
@@ -79,6 +92,7 @@ class SessionService:
         # process-wide active marker on its own narrower lock so unrelated
         # agents can create, renew, and terminate sessions concurrently.
         self._agent_locks: dict[str, threading.RLock] = {}
+        self._agent_file_locks: dict[str, FileLock] = {}
         self._agent_locks_guard = threading.Lock()
         self._active_marker_lock = threading.RLock()
         self._summary_lock = threading.Lock()
@@ -99,6 +113,33 @@ class SessionService:
                 lock = threading.RLock()
                 self._agent_locks[agent_id] = lock
             return lock
+
+    def _file_lock_for_agent(self, agent_id: str) -> FileLock:
+        """Return the stable cross-process lifecycle lock for one agent."""
+        validate_safe_id(agent_id, "agent_id")
+        self._harden_session_storage()
+        with self._agent_locks_guard:
+            lock = self._agent_file_locks.get(agent_id)
+            if lock is None:
+                lock_path = self.sessions_dir / f".{agent_id}.lifecycle.lock"
+                lock = FileLock(
+                    str(lock_path),
+                    timeout=-1,
+                    mode=self._PRIVATE_FILE_MODE,
+                )
+                self._agent_file_locks[agent_id] = lock
+            return lock
+
+    @contextmanager
+    def lock_agent_lifecycle(self, agent_id: str) -> Iterator[None]:
+        """Serialize agent/session lifecycle changes across threads and processes.
+
+        Agent metadata and bearer-session state live in separate services. Callers
+        that need to inspect or delete both must hold this shared lock so an
+        activation cannot publish a fresh token after deletion has started.
+        """
+        with self._lock_for_agent(agent_id), self._file_lock_for_agent(agent_id):
+            yield
 
     @staticmethod
     def _set_private_permissions(path: Path, mode: int) -> None:
@@ -297,7 +338,7 @@ class SessionService:
         Returns:
             Session object with JWT token
         """
-        with self._lock_for_agent(agent_id):
+        with self.lock_agent_lifecycle(agent_id):
             return self._create_session(agent_id, pattern, duration_hours)
 
     def _create_session(
@@ -417,26 +458,34 @@ class SessionService:
         session_file = self.sessions_dir / f"{agent_id}.json"
         return self._load_session_file(session_file)
 
+    def _read_active_marker_agent_id(self) -> str | None:
+        """Read the agent_id the active marker points at, or None.
+
+        Caller must hold ``_active_marker_lock``.
+        """
+        active_link = self.sessions_dir / "active"
+        try:
+            # Read symlink (or file on Windows). Another process can replace
+            # or remove the marker while this process holds its local lock.
+            if active_link.is_symlink():
+                return active_link.readlink().stem
+            with open(active_link) as f:
+                return f.read().strip()
+        except OSError:
+            return None
+
     def get_active_session(self) -> Session | None:
         """
         Get currently active session
 
         Returns:
-            Session object or None if no active session or session is expired
+            Session object or None when there is no active marker, or the
+            marker named a session that has lapsed and could not be
+            auto-recreated.
         """
         with self._active_marker_lock:
-            active_link = self.sessions_dir / "active"
-
-            try:
-                # Read symlink (or file on Windows). Another process can replace
-                # or remove the marker while this process holds its local lock.
-                if active_link.is_symlink():
-                    target = active_link.readlink()
-                    agent_id = target.stem
-                else:
-                    with open(active_link) as f:
-                        agent_id = f.read().strip()
-            except OSError:
+            agent_id = self._read_active_marker_agent_id()
+            if agent_id is None:
                 return None
 
             try:
@@ -450,13 +499,36 @@ class SessionService:
             if not session:
                 return None
 
-            # If session is expired, clear the stale marker and return None.
-            # The marker lock is re-entrant for this cleanup path.
-            if not session.is_active():
-                self._clear_active_session()
-                return None
+            if session.is_active():
+                return session
 
-            return session
+            expired_token = session.session_token
+
+        # The marker names a session that has lapsed. Auto-recreate has to run
+        # outside the marker lock: it takes the agent lifecycle lock, and
+        # delete_session takes those two in the opposite order, so holding both
+        # here would invert the lock order.
+        #
+        # This is what keeps MEMANTO usable after an idle gap. Every CLI entry
+        # point resolves its session through this marker, so clearing it on
+        # expiry stranded the caller with "No active session. Call
+        # activate_agent()" regardless of the auto-recreate setting.
+        recreated = self.check_and_auto_recreate(expired_token)
+        if recreated is not None:
+            return recreated
+
+        # Recreation declined (disabled by config, or the session was
+        # terminated). Drop the stale marker, but only if it still names the
+        # same lapsed session - another thread may have activated since.
+        with self._active_marker_lock:
+            if self._read_active_marker_agent_id() == agent_id:
+                try:
+                    current = self.get_session(agent_id)
+                except (ValueError, OSError):
+                    current = None
+                if current is None or not current.is_active():
+                    self._clear_active_session()
+        return None
 
     def end_session(self, agent_id: str) -> SessionSummary:
         """
@@ -471,7 +543,7 @@ class SessionService:
         Raises:
             SessionNotFoundError: If session doesn't exist
         """
-        with self._lock_for_agent(agent_id):
+        with self.lock_agent_lifecycle(agent_id):
             return self._end_session(agent_id)
 
     def _end_session(self, agent_id: str) -> SessionSummary:
@@ -554,7 +626,7 @@ class SessionService:
         # near-expiry session, mint competing tokens, and immediately
         # invalidate every replacement except the last file write. The same
         # lock also makes logout authoritative over an in-flight renewal.
-        with self._lock_for_agent(agent_id):
+        with self.lock_agent_lifecycle(agent_id):
             session = self.get_session(agent_id)
             if not session or not session.is_active():
                 return None
@@ -570,6 +642,65 @@ class SessionService:
                 )
 
         return None
+
+    def check_and_auto_recreate(
+        self,
+        session_token: str,
+    ) -> Session | None:
+        """
+        Recreate an expired session as a fresh one if auto-recreate is enabled.
+
+        Complements check_and_auto_renew: renewal keeps a *live* session
+        going near expiry, while this path transparently issues a brand-new
+        session (new JWT, fresh expiry window) when a caller presents the
+        token of a session that has already fully lapsed. Deliberately
+        terminated sessions are never resurrected; callers must activate
+        explicitly after logout. Authorization is the route layer's job
+        (management credential or loopback), same as explicit activation.
+
+        Args:
+            session_token: The expired JWT presented by the caller
+        Returns:
+            New Session if recreated, None when recreation does not apply
+        """
+        if not settings.SESSION_AUTO_RECREATE_ENABLED:
+            return None
+
+        try:
+            payload = jwt.decode(session_token, self.secret_key, algorithms=["HS256"])
+            token = SessionToken(**payload)
+        except (jwt.InvalidTokenError, ValidationError):
+            # Not ours / malformed / unsignable: leave it to normal validation
+            # to surface the right error.
+            return None
+
+        try:
+            validate_safe_id(token.agent_id, "agent_id")
+        except ValueError:
+            # A token we signed but whose agent_id is no longer a safe id.
+            # Leave it to normal validation to reject rather than raising an
+            # unhandled 500 out of the auth dependency.
+            return None
+
+        # Hold the same cross-process lifecycle lock as logout until the
+        # expired-session check AND replacement publication both finish.
+        with self.lock_agent_lifecycle(token.agent_id):
+            session = self.get_session(token.agent_id)
+            if not session or session.session_id != token.session_id:
+                # Unknown agent, or the persisted record was replaced by a
+                # newer session — never supersede it from a stale token.
+                return None
+
+            if session.status == SessionStatus.TERMINATED or session.is_active():
+                # Logout is authoritative; live sessions are handled by the
+                # regular validation/auto-renewal flow instead.
+                return None
+
+            return self.create_session(
+                agent_id=token.agent_id,
+                pattern=session.pattern,
+                duration_hours=settings.SESSION_DEFAULT_DURATION_HOURS,
+            )
 
     def _save_session(self, session: Session) -> None:
         """Save session to file.
@@ -634,8 +765,10 @@ class SessionService:
         self._harden_session_storage()
 
         # Format the memory into Markdown
-        memory_type = (getattr(memory_record, "type", None) or "unclassified").upper()
-        title = getattr(memory_record, "title", "Untitled")
+        memory_type = _one_line(
+            getattr(memory_record, "type", None), "unclassified"
+        ).upper()
+        title = _one_line(getattr(memory_record, "title", None), "Untitled")
         content = getattr(memory_record, "content", "")
         confidence = getattr(memory_record, "confidence", 1.0)
         # Fall back to the record's own id so the ID is logged on every path
@@ -822,7 +955,7 @@ class SessionService:
         Used when an agent is deleted: the agent metadata is gone, so a saved
         session for that agent must not remain usable through X-Session-Token.
         """
-        with self._lock_for_agent(agent_id), self._active_marker_lock:
+        with self.lock_agent_lifecycle(agent_id), self._active_marker_lock:
             active_link = self.sessions_dir / "active"
             active_agent_id: str | None = None
 
