@@ -5010,6 +5010,47 @@
             "title": "Tags",
             "description": "Tags for this memory"
           },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "expired"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status",
+            "description": "Memory lifecycle status (e.g. active, expired)"
+          },
+          "expired_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expired At",
+            "description": "When this memory was expired"
+          },
+          "expired_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expired By",
+            "description": "What/who expired this memory"
+          },
           "source": {
             "type": "string",
             "maxLength": 64,
@@ -5165,7 +5206,7 @@
         "properties": {
           "file": {
             "type": "string",
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File",
             "description": "File to upload (.pdf, .docx, .xlsx, .json, .txt, .csv, .md)"
           }
@@ -6343,6 +6384,47 @@
             ],
             "title": "Tags",
             "description": "Tags for this memory"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "expired"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status",
+            "description": "Memory lifecycle status (e.g. active, expired)"
+          },
+          "expired_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expired At",
+            "description": "When this memory was expired"
+          },
+          "expired_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expired By",
+            "description": "What/who expired this memory"
           },
           "source": {
             "type": "string",
