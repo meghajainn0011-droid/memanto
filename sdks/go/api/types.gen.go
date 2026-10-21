@@ -32,24 +32,6 @@ func (e AgentPattern) Valid() bool {
 	}
 }
 
-// Defines values for BatchRememberItemStatus.
-const (
-	BatchRememberItemStatusActive  BatchRememberItemStatus = "active"
-	BatchRememberItemStatusExpired BatchRememberItemStatus = "expired"
-)
-
-// Valid indicates whether the value is a known member of the BatchRememberItemStatus enum.
-func (e BatchRememberItemStatus) Valid() bool {
-	switch e {
-	case BatchRememberItemStatusActive:
-		return true
-	case BatchRememberItemStatusExpired:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for BatchRememberItemType.
 const (
 	BatchRememberItemTypeArtifact     BatchRememberItemType = "artifact"
@@ -332,24 +314,6 @@ func (e RecallRequestStatus) Valid() bool {
 	}
 }
 
-// Defines values for RememberRequestStatus.
-const (
-	RememberRequestStatusActive  RememberRequestStatus = "active"
-	RememberRequestStatusExpired RememberRequestStatus = "expired"
-)
-
-// Valid indicates whether the value is a known member of the RememberRequestStatus enum.
-func (e RememberRequestStatus) Valid() bool {
-	switch e {
-	case RememberRequestStatusActive:
-		return true
-	case RememberRequestStatusExpired:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for RememberRequestType.
 const (
 	RememberRequestTypeArtifact     RememberRequestType = "artifact"
@@ -498,20 +462,11 @@ type BatchRememberItem struct {
 	// Content Memory content
 	Content string `json:"content"`
 
-	// ExpiredAt When this memory was expired
-	ExpiredAt *time.Time `json:"expired_at,omitempty"`
-
-	// ExpiredBy What/who expired this memory
-	ExpiredBy *string `json:"expired_by,omitempty"`
-
 	// Provenance How memory was obtained (explicit_statement, inferred, observed, etc.)
 	Provenance *string `json:"provenance,omitempty"`
 
 	// Source Who wrote this memory — 'user', 'agent', or a specific writer such as 'cursor', 'codex', or 'claude_code'.
 	Source *string `json:"source,omitempty"`
-
-	// Status Memory lifecycle status (e.g. active, expired)
-	Status *BatchRememberItemStatus `json:"status,omitempty"`
 
 	// Tags Tags for this memory
 	Tags *[]string `json:"tags,omitempty"`
@@ -522,9 +477,6 @@ type BatchRememberItem struct {
 	// Type Memory type. Omit to auto-parse.
 	Type *BatchRememberItemType `json:"type,omitempty"`
 }
-
-// BatchRememberItemStatus defines model for BatchRememberItem.Status.
-type BatchRememberItemStatus string
 
 // BatchRememberItemType defines model for BatchRememberItem.Type.
 type BatchRememberItemType string
@@ -876,20 +828,11 @@ type RememberRequest struct {
 	// Content Memory content
 	Content string `json:"content"`
 
-	// ExpiredAt When this memory was expired
-	ExpiredAt *time.Time `json:"expired_at,omitempty"`
-
-	// ExpiredBy What/who expired this memory
-	ExpiredBy *string `json:"expired_by,omitempty"`
-
 	// Provenance How memory was obtained (explicit_statement, inferred, observed, etc.)
 	Provenance *string `json:"provenance,omitempty"`
 
 	// Source Who wrote this memory — 'user', 'agent', or a specific writer such as 'cursor', 'codex', or 'claude_code'.
 	Source *string `json:"source,omitempty"`
-
-	// Status Memory lifecycle status (e.g. active, expired)
-	Status *RememberRequestStatus `json:"status,omitempty"`
 
 	// Tags Tags for this memory
 	Tags *[]string `json:"tags,omitempty"`
@@ -900,9 +843,6 @@ type RememberRequest struct {
 	// Type Memory type. Omit to auto-parse.
 	Type *RememberRequestType `json:"type,omitempty"`
 }
-
-// RememberRequestStatus defines model for RememberRequest.Status.
-type RememberRequestStatus string
 
 // RememberRequestType defines model for RememberRequest.Type.
 type RememberRequestType string

@@ -228,7 +228,7 @@ def _count_memories(output: str) -> int | None:
         return None
     if isinstance(data, dict):
         if isinstance(data.get("count"), int):
-            return data["count"]
+            return int(data["count"])
         if isinstance(data.get("memories"), list):
             return len(data["memories"])
     if isinstance(data, list):

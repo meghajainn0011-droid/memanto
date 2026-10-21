@@ -1,9 +1,9 @@
-﻿{
+{
   "openapi": "3.1.0",
   "info": {
     "title": "Memanto - Memory that AI Agents Love!",
     "description": "A memory layer service for agentic AI systems using Moorcheh SDK",
-    "version": "0.2.30.dev5+g4a7a32b"
+    "version": "0.0.0.dev0"
   },
   "paths": {
     "/health": {
@@ -5010,47 +5010,6 @@
             "title": "Tags",
             "description": "Tags for this memory"
           },
-          "status": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "active",
-                  "expired"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Status",
-            "description": "Memory lifecycle status (e.g. active, expired)"
-          },
-          "expired_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expired At",
-            "description": "When this memory was expired"
-          },
-          "expired_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expired By",
-            "description": "What/who expired this memory"
-          },
           "source": {
             "type": "string",
             "maxLength": 64,
@@ -6384,47 +6343,6 @@
             ],
             "title": "Tags",
             "description": "Tags for this memory"
-          },
-          "status": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "active",
-                  "expired"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Status",
-            "description": "Memory lifecycle status (e.g. active, expired)"
-          },
-          "expired_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expired At",
-            "description": "When this memory was expired"
-          },
-          "expired_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expired By",
-            "description": "What/who expired this memory"
           },
           "source": {
             "type": "string",
