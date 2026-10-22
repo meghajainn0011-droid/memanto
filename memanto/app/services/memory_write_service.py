@@ -2,21 +2,45 @@
 Memory Write Service
 """
 
+import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from moorcheh_sdk import MoorchehClient
 
-from memanto.app.constants import VALID_STATUS_TYPES
+from memanto.app.constants import INJECTION_PATTERNS, VALID_STATUS_TYPES
 from memanto.app.core import MemoryRecord, is_valid_expired_by, is_valid_source
 from memanto.app.services.activity_service import log_memory_activity
 from memanto.app.services.memory_parsing_service import MemoryParsingService
-from memanto.app.utils.errors import MemoryOperationError
+from memanto.app.utils.errors import MemoryOperationError, ValidationError
 from memanto.app.utils.ids import generate_memory_id
 from memanto.app.utils.temporal_helpers import as_utc_aware
 
 SUCCESSFUL_UPLOAD_STATUSES = {"queued", "success", "ok"}
+
+_INGECTION_RE = re.compile(
+    "|".join(f"(?:{pattern})" for pattern in INJECTION_PATTERNS),
+    re.IGNORECASE,
+)
+
+
+def assert_not_directive_payload(memory: MemoryRecord) -> None:
+    """Shared anti-poisoning guard for every direct write path.
+
+    ``SECURITY.md`` promises "Anti-poisoning validation for facts and
+    preferences", but ``INJECTION_PATTERNS`` was only enforced in the
+    conversational extraction pipeline. Directive-injection payloads stored
+    via ``remember`` / ``batch-remember`` flow into the ``answer`` RAG prompt
+    for the namespace, so any write path must apply the same rule set.
+    """
+    for field in (memory.content, memory.title):
+        if field and _INGECTION_RE.search(field):
+            raise ValidationError(
+                "Memory content rejected by anti-poisoning policy: "
+                "directive-injection payload detected"
+            )
+
 
 # Fields owned by the current MemoryRecord/document schema. They must not be
 # copied from the old document after an update because an omitted optional field
@@ -130,13 +154,12 @@ class MemoryWriteService:
             # Add namespace
             namespace = memory.namespace()
 
-            # skip validation for speed
-            ## Validate memory
-            # validation_result = self.validation_service.validate_memory(memory, context)
-            ## Use validated memory if modified
-            # if "memory" in validation_result:
-            #     memory = validation_result["memory"]
-            validation_result = {"action": "store", "reason": "MVP direct store"}
+            # Anti-poisoning invariant shared with the extraction pipeline.
+            assert_not_directive_payload(memory)
+            validation_result = {
+                "action": "store",
+                "reason": "Anti-poisoning guard passed (directive-injection scan)",
+            }
 
             from typing import cast
 
@@ -163,6 +186,8 @@ class MemoryWriteService:
                 "type": memory.type,
             }
 
+        except ValidationError:
+            raise
         except Exception as e:
             raise MemoryOperationError(f"Failed to store memory: {e}")
 
@@ -224,15 +249,11 @@ class MemoryWriteService:
                         )
                         continue
 
-                    # skip validation for speed
-                    ## Validate memory
-                    # validation_result = self.validation_service.validate_memory(memory, context)
-                    ## Use validated memory if modified
-                    # if "memory" in validation_result:
-                    #     memory = validation_result["memory"]
+                    # Anti-poisoning invariant shared with the extraction pipeline.
+                    assert_not_directive_payload(memory)
                     validation_result = {
                         "action": "store",
-                        "reason": "MVP direct store",
+                        "reason": "Anti-poisoning guard passed (directive-injection scan)",
                     }
 
                     from typing import cast
@@ -324,6 +345,8 @@ class MemoryWriteService:
                 "results": results,
             }
 
+        except ValidationError:
+            raise
         except Exception as e:
             raise MemoryOperationError(f"Failed to batch store memories: {e}")
 
